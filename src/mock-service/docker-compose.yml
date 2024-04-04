@@ -1,0 +1,77 @@
+version: "3"
+
+services:
+  wind_turbine_mock_db:
+    container_name: wind_turbine_mock_db
+    image: postgres:16
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - 172.17.0.1:5433:5432
+    volumes:
+      - ./wind_turbine.sql:/docker-entrypoint-initdb.d/init.sql
+      - wind_turbine_mock_pgdata:/var/lib/postgresql/data/
+
+    command: ["docker-entrypoint.sh", "postgres", "-c", "max_connections=300"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "-U",
+          "postgres",
+          "-d",
+          "wind_turbine",
+          "-h",
+          "127.0.0.1",
+          "-p",
+          "5432",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 500
+    networks:
+      - wind_turbine_mock_network
+
+  wind_turbine_mock_app:
+    container_name: wind_turbine_mock_app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    volumes:
+      - .:/app
+    depends_on:
+      wind_turbine_mock_db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/docs"]
+      interval: 5s
+      timeout: 10s
+      retries: 50
+    ports:
+      - "8011:8000"
+    networks:
+      - wind_turbine_mock_network
+
+  # pgadmin4:
+  #   image: elestio/pgadmin
+  #   container_name: mock_pgadmin4
+  #   restart: always
+  #   env_file:
+  #     - .env
+  #   ports:
+  #     - "172.17.0.1:5050:5050"
+  #   depends_on:
+  #     - postgres
+  #   volumes:
+  #     - ./servers.json:/pgadmin4/servers.json
+
+volumes:
+  wind_turbine_mock_pgdata:
+    driver: local
+
+networks:
+  wind_turbine_mock_network:
+    driver: bridge

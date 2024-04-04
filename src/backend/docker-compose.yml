@@ -1,0 +1,109 @@
+version: "3"
+
+services:
+  wind_turbine_redis:
+    container_name: wind_turbine_redis
+    image: redis:7.2.4-bookworm
+    restart: always
+    networks:
+      - wind_turbine_backend_network
+
+  wind_turbine_backend_db:
+    container_name: wind_turbine_backend_db
+    image: postgres:16
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - wind_turbine_backend_pgdata:/var/lib/postgresql/data/
+    env_file:
+      - .dockerenv
+    ports:
+      - "5443:5432"
+    networks:
+      - wind_turbine_backend_network
+
+  wind_turbine_backend_app:
+    container_name: wind_turbine_backend_app
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - .:/app
+    depends_on:
+      - wind_turbine_backend_db
+    ports:
+      - "8010:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/docs"]
+      interval: 5s
+      timeout: 10s
+      retries: 50
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - wind_turbine_backend_network
+
+  wind_turbine_worker:
+    container_name: wind_turbine_backend_worker
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+    depends_on:
+      wind_turbine_redis:
+        condition: service_started
+      wind_turbine_backend_app:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - wind_turbine_backend_network
+
+  wind_turbine_beat:
+    container_name: wind_turbine_backend_beat
+    build:
+      context: .
+      dockerfile: Dockerfile.beat
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+    depends_on:
+      - wind_turbine_worker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - wind_turbine_backend_network
+
+  wind_turbine_flower:
+    container_name: wind_turbine_backend_flower
+    restart: always
+    build:
+      context: .
+      dockerfile: Dockerfile.flower
+    environment:
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:5555"]
+      interval: 5s
+      timeout: 10s
+      retries: 50
+    ports:
+      - 5565:5555
+    depends_on:
+      - wind_turbine_worker
+    networks:
+      - wind_turbine_backend_network
+
+volumes:
+  wind_turbine_backend_pgdata:
+    driver: local
+
+networks:
+  wind_turbine_backend_network:
+    driver: bridge
